@@ -1,71 +1,75 @@
 from django.db import models
-from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
-from django.utils import timezone
-from users.managers import UserManager
+from django.conf import settings
+from django.core.validators import MinValueValidator
 
 
-class User(AbstractBaseUser, PermissionsMixin):
+class Payment(models.Model):
     """
-    Кастомная модель пользователя с email в качестве логина
+    Модель платежа
     """
-    email = models.EmailField(
-        unique=True,
-        verbose_name='Email',
-        help_text='Введите email адрес'
+    CASH = 'cash'
+    TRANSFER = 'transfer'
+
+    PAYMENT_METHOD_CHOICES = [
+        (CASH, 'Наличные'),
+        (TRANSFER, 'Перевод на счет'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name='Пользователь'
     )
-    first_name = models.CharField(
-        max_length=50,
+    payment_date = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Дата оплаты'
+    )
+    course = models.ForeignKey(
+        'lms.Course',
+        on_delete=models.CASCADE,
+        null=True,
         blank=True,
-        verbose_name='Имя'
+        related_name='payments',
+        verbose_name='Оплаченный курс'
     )
-    last_name = models.CharField(
-        max_length=50,
+    lesson = models.ForeignKey(
+        'lms.Lesson',
+        on_delete=models.CASCADE,
+        null=True,
         blank=True,
-        verbose_name='Фамилия'
+        related_name='payments',
+        verbose_name='Оплаченный урок'
     )
-    phone = models.CharField(
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+        verbose_name='Сумма оплаты'
+    )
+    payment_method = models.CharField(
         max_length=20,
-        blank=True,
-        null=True,
-        verbose_name='Телефон',
-        help_text='Введите номер телефона'
+        choices=PAYMENT_METHOD_CHOICES,
+        verbose_name='Способ оплаты'
     )
-    city = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        verbose_name='Город',
-        help_text='Введите город проживания'
-    )
-    avatar = models.ImageField(
-        upload_to='avatars/',
-        blank=True,
-        null=True,
-        verbose_name='Аватарка',
-        help_text='Загрузите аватар'
-    )
-    is_staff = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)
-    is_superuser = models.BooleanField(default=False)
-    date_joined = models.DateTimeField(default=timezone.now)
-
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = []
-
-    objects = UserManager()
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = 'Пользователь'
-        verbose_name_plural = 'Пользователи'
-        ordering = ['-date_joined']
+        verbose_name = 'Платеж'
+        verbose_name_plural = 'Платежи'
+        ordering = ['-payment_date']
 
     def __str__(self):
-        return self.email
+        target = self.course if self.course else self.lesson
+        return f"Платеж {self.user.email} - {target} - {self.amount} руб."
 
-    def get_full_name(self):
-        if self.first_name or self.last_name:
-            return f"{self.first_name} {self.last_name}".strip()
-        return self.email
+    def clean(self):
+        """Проверка, что оплачен либо курс, либо урок"""
+        if not self.course and not self.lesson:
+            raise ValueError('Должен быть оплачен либо курс, либо урок')
+        if self.course and self.lesson:
+            raise ValueError('Нельзя оплатить одновременно курс и урок')
 
-    def get_short_name(self):
-        return self.first_name or self.email.split('@')[0]
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
