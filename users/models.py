@@ -1,6 +1,69 @@
 from django.db import models
-from django.conf import settings
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
+from django.utils import timezone
 from django.core.validators import MinValueValidator
+from users.managers import UserManager
+
+
+class User(AbstractBaseUser, PermissionsMixin):
+    """
+    Кастомная модель пользователя с email в качестве логина
+    """
+    email = models.EmailField(
+        unique=True,
+        verbose_name='Email',
+        help_text='Введите email адрес'
+    )
+    first_name = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name='Имя'
+    )
+    last_name = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name='Фамилия'
+    )
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='Телефон'
+    )
+    city = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='Город'
+    )
+    avatar = models.ImageField(
+        upload_to='avatars/',
+        blank=True,
+        null=True,
+        verbose_name='Аватарка'
+    )
+    is_staff = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    is_superuser = models.BooleanField(default=False)
+    date_joined = models.DateTimeField(default=timezone.now)
+
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    class Meta:
+        verbose_name = 'Пользователь'
+        verbose_name_plural = 'Пользователи'
+        ordering = ['-date_joined']
+
+    def __str__(self):
+        return self.email
+
+    def get_full_name(self):
+        if self.first_name or self.last_name:
+            return f"{self.first_name} {self.last_name}".strip()
+        return self.email
 
 
 class Payment(models.Model):
@@ -16,7 +79,7 @@ class Payment(models.Model):
     ]
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name='payments',
         verbose_name='Пользователь'
@@ -62,14 +125,3 @@ class Payment(models.Model):
     def __str__(self):
         target = self.course if self.course else self.lesson
         return f"Платеж {self.user.email} - {target} - {self.amount} руб."
-
-    def clean(self):
-        """Проверка, что оплачен либо курс, либо урок"""
-        if not self.course and not self.lesson:
-            raise ValueError('Должен быть оплачен либо курс, либо урок')
-        if self.course and self.lesson:
-            raise ValueError('Нельзя оплатить одновременно курс и урок')
-
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)

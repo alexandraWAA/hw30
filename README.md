@@ -8,12 +8,27 @@ LMS (Learning Management System) - платформа для онлайн-обу
 - Django 4.2.7
 - Django REST Framework 3.14.0
 - PostgreSQL
-- Pillow (для работы с изображениями)
+- Pillow
 
-## 📦 Установка и запуск
-
-### 1. Клонирование репозитория
+## 📦 Установка
 
 ```bash
-git clone <url-репозитория>
-cd lms-project
+# Клонирование
+git clone <url>
+cd lms_project
+
+# Виртуальное окружение
+python -m venv .venv
+source .venv/bin/activate  # или .venv\Scripts\activate
+
+# Установка
+pip install -r requirements.txt
+
+# Настройка .env
+cp .env.example .env
+
+# Миграции
+python manage.py migrate
+
+# Запуск
+python manage.py runserver

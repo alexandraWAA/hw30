@@ -7,21 +7,18 @@ class Course(models.Model):
     """
     name = models.CharField(
         max_length=200,
-        verbose_name='Название',
-        help_text='Введите название курса'
+        verbose_name='Название'
     )
     preview = models.ImageField(
         upload_to='course_previews/',
-        verbose_name='Превью',
         blank=True,
         null=True,
-        help_text='Загрузите изображение для превью'
+        verbose_name='Превью'
     )
     description = models.TextField(
-        verbose_name='Описание',
-        help_text='Введите описание курса',
         blank=True,
-        null=True
+        null=True,
+        verbose_name='Описание'
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
@@ -41,34 +38,29 @@ class Lesson(models.Model):
     """
     name = models.CharField(
         max_length=200,
-        verbose_name='Название',
-        help_text='Введите название урока'
+        verbose_name='Название'
     )
     description = models.TextField(
-        verbose_name='Описание',
-        help_text='Введите описание урока',
         blank=True,
-        null=True
+        null=True,
+        verbose_name='Описание'
     )
     preview = models.ImageField(
         upload_to='lesson_previews/',
-        verbose_name='Превью',
         blank=True,
         null=True,
-        help_text='Загрузите изображение для превью'
+        verbose_name='Превью'
     )
     video_url = models.URLField(
-        verbose_name='Ссылка на видео',
-        help_text='Введите ссылку на видео',
         blank=True,
-        null=True
+        null=True,
+        verbose_name='Ссылка на видео'
     )
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
         related_name='lessons',
-        verbose_name='Курс',
-        help_text='Выберите курс, к которому относится урок'
+        verbose_name='Курс'
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
