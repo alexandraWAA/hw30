@@ -3,9 +3,6 @@ from lms.models import Course, Lesson
 
 
 class LessonSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для модели урока
-    """
     course_name = serializers.CharField(source='course.name', read_only=True)
 
     class Meta:
@@ -18,19 +15,13 @@ class LessonSerializer(serializers.ModelSerializer):
 
 
 class LessonCreateUpdateSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для создания/обновления урока
-    """
     class Meta:
         model = Lesson
         fields = ['name', 'description', 'preview', 'video_url', 'course']
 
 
 class CourseSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для модели курса
-    """
-    lessons_count = serializers.IntegerField(source='lessons.count', read_only=True)
+    lessons_count = serializers.SerializerMethodField()
     lessons = LessonSerializer(many=True, read_only=True)
 
     class Meta:
@@ -41,11 +32,11 @@ class CourseSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def get_lessons_count(self, obj):
+        return obj.lessons.count()
+
 
 class CourseCreateUpdateSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для создания/обновления курса
-    """
     class Meta:
         model = Course
         fields = ['name', 'preview', 'description']

@@ -7,10 +7,7 @@ from lms.serializers import (
 
 
 class CourseViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet для CRUD операций с курсами
-    """
-    queryset = Course.objects.all()
+    queryset = Course.objects.prefetch_related('lessons').all()
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -19,11 +16,6 @@ class CourseViewSet(viewsets.ModelViewSet):
 
 
 class LessonListCreateView(generics.ListCreateAPIView):
-    """
-    Generic класс для получения списка уроков и создания нового урока
-    GET /api/lms/lessons/ - список всех уроков
-    POST /api/lms/lessons/ - создание нового урока
-    """
     queryset = Lesson.objects.select_related('course').all()
 
     def get_serializer_class(self):
@@ -33,13 +25,6 @@ class LessonListCreateView(generics.ListCreateAPIView):
 
 
 class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    Generic класс для получения, обновления и удаления одного урока
-    GET /api/lms/lessons/<id>/ - получение урока
-    PUT /api/lms/lessons/<id>/ - полное обновление урока
-    PATCH /api/lms/lessons/<id>/ - частичное обновление урока
-    DELETE /api/lms/lessons/<id>/ - удаление урока
-    """
     queryset = Lesson.objects.select_related('course').all()
 
     def get_serializer_class(self):
@@ -49,10 +34,6 @@ class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class LessonsByCourseView(generics.ListAPIView):
-    """
-    Дополнительный эндпоинт: список уроков по конкретному курсу
-    GET /api/lms/courses/<course_id>/lessons/
-    """
     serializer_class = LessonSerializer
 
     def get_queryset(self):
