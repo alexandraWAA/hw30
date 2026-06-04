@@ -19,6 +19,26 @@ class CourseViewSet(viewsets.ModelViewSet):
             return CourseCreateUpdateSerializer
         return CourseSerializer
 
+    def get_queryset(self):
+        """
+        Фильтрация queryset для списка курсов:
+        - Модераторы видят все курсы
+        - Обычные пользователи видят только свои курсы
+        """
+        qs = super().get_queryset()
+        user = self.request.user
+
+        # Если пользователь не авторизован, возвращаем пустой queryset
+        if not user.is_authenticated:
+            return qs.none()
+
+        # Модераторы видят все курсы
+        if user.groups.filter(name='Модераторы').exists():
+            return qs
+
+        # Обычные пользователи видят только свои курсы
+        return qs.filter(owner=user)
+
     def get_permissions(self):
         """
         Настройка прав доступа для разных действий
@@ -30,8 +50,9 @@ class CourseViewSet(viewsets.ModelViewSet):
             # Создание курса: только не-модераторы (обычные пользователи)
             permission_classes = [permissions.IsAuthenticated, ~IsModerator]
         elif self.action in ['update', 'partial_update']:
-            # Редактирование: модераторы ИЛИ владельцы
-            permission_classes = [permissions.IsAuthenticated, IsModerator | IsOwner]
+            # Редактирование: сначала проверяем владельца, потом модератора
+            # (оптимизация: не делаем лишний запрос к БД)
+            permission_classes = [permissions.IsAuthenticated, IsOwner | IsModerator]
         elif self.action == 'destroy':
             # Удаление: только владельцы (модераторы НЕ могут удалять)
             permission_classes = [permissions.IsAuthenticated, IsOwner, ~IsModerator]
@@ -57,16 +78,35 @@ class LessonListCreateView(generics.ListCreateAPIView):
             return LessonCreateUpdateSerializer
         return LessonSerializer
 
+    def get_queryset(self):
+        """
+        Фильтрация queryset для списка уроков:
+        - Модераторы видят все уроки
+        - Обычные пользователи видят только свои уроки
+        """
+        qs = super().get_queryset()
+        user = self.request.user
+
+        # Если пользователь не авторизован, возвращаем пустой queryset
+        if not user.is_authenticated:
+            return qs.none()
+
+        # Модераторы видят все уроки
+        if user.groups.filter(name='Модераторы').exists():
+            return qs
+
+        # Обычные пользователи видят только свои уроки
+        return qs.filter(owner=user)
+
     def get_permissions(self):
         """
         Настройка прав доступа
+        Достаточно проверять только на POST, на все остальное - только аутентификация
         """
-        if self.request.method == 'GET':
-            # Просмотр списка доступен всем авторизованным
-            return [permissions.IsAuthenticated()]
-        elif self.request.method == 'POST':
+        if self.request.method == 'POST':
             # Создание урока: только не-модераторы (обычные пользователи)
             return [permissions.IsAuthenticated(), ~IsModerator()]
+        # GET и другие методы: только проверка аутентификации
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
@@ -95,8 +135,8 @@ class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
             # Просмотр деталей доступен всем авторизованным
             return [permissions.IsAuthenticated()]
         elif self.request.method in ['PUT', 'PATCH']:
-            # Редактирование: модераторы ИЛИ владельцы
-            return [permissions.IsAuthenticated(), IsModerator() | IsOwner()]
+            # Редактирование: сначала проверяем владельца, потом модератора
+            return [permissions.IsAuthenticated(), IsOwner() | IsModerator()]
         elif self.request.method == 'DELETE':
             # Удаление: только владельцы (модераторы НЕ могут удалять)
             return [permissions.IsAuthenticated(), IsOwner(), ~IsModerator()]
@@ -111,5 +151,18 @@ class LessonsByCourseView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        """
+        Фильтрация уроков по курсу с учетом прав пользователя
+        """
         course_id = self.kwargs.get('course_id')
-        return Lesson.objects.filter(course_id=course_id).select_related('course', 'owner')
+        user = self.request.user
+
+        # Базовый queryset для указанного курса
+        qs = Lesson.objects.filter(course_id=course_id).select_related('course', 'owner')
+
+        # Модераторы видят все уроки курса
+        if user.groups.filter(name='Модераторы').exists():
+            return qs
+
+        # Обычные пользователи видят только свои уроки в этом курсе
+        return qs.filter(owner=user)
