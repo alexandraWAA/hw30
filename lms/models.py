@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 
 class Course(models.Model):
@@ -7,18 +8,29 @@ class Course(models.Model):
     """
     name = models.CharField(
         max_length=200,
-        verbose_name='Название'
+        verbose_name='Название',
+        help_text='Введите название курса'
     )
     preview = models.ImageField(
         upload_to='course_previews/',
+        verbose_name='Превью',
         blank=True,
         null=True,
-        verbose_name='Превью'
+        help_text='Загрузите изображение для превью'
     )
     description = models.TextField(
+        verbose_name='Описание',
+        help_text='Введите описание курса',
         blank=True,
+        null=True
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='courses',
+        verbose_name='Владелец',
         null=True,
-        verbose_name='Описание'
+        blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
@@ -38,29 +50,42 @@ class Lesson(models.Model):
     """
     name = models.CharField(
         max_length=200,
-        verbose_name='Название'
+        verbose_name='Название',
+        help_text='Введите название урока'
     )
     description = models.TextField(
+        verbose_name='Описание',
+        help_text='Введите описание урока',
         blank=True,
-        null=True,
-        verbose_name='Описание'
+        null=True
     )
     preview = models.ImageField(
         upload_to='lesson_previews/',
+        verbose_name='Превью',
         blank=True,
         null=True,
-        verbose_name='Превью'
+        help_text='Загрузите изображение для превью'
     )
     video_url = models.URLField(
+        verbose_name='Ссылка на видео',
+        help_text='Введите ссылку на видео',
         blank=True,
-        null=True,
-        verbose_name='Ссылка на видео'
+        null=True
     )
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
         related_name='lessons',
-        verbose_name='Курс'
+        verbose_name='Курс',
+        help_text='Выберите курс, к которому относится урок'
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='lessons',
+        verbose_name='Владелец',
+        null=True,
+        blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
