@@ -1,7 +1,4 @@
 from rest_framework import viewsets, generics, permissions, status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from django.shortcuts import get_object_or_404
 from lms.models import Course, Lesson, Subscription
 from lms.serializers import (
     CourseSerializer, CourseCreateUpdateSerializer,
@@ -10,7 +7,17 @@ from lms.serializers import (
 )
 from lms.paginators import CoursePaginator, LessonPaginator
 from users.permissions import IsModerator, IsOwner
-
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, serializers
+from django.shortcuts import get_object_or_404
+from django.conf import settings
+from lms.models import Course, Payment
+from lms.serializers import PaymentSerializer, PaymentCreateSerializer, PaymentStatusSerializer
+from lms.services import (
+    sync_course_with_stripe, create_checkout_session,
+    get_stripe_session_status
+)
 
 class CourseViewSet(viewsets.ModelViewSet):
     """
@@ -180,4 +187,159 @@ class SubscriptionView(APIView):
         """
         subscriptions = Subscription.objects.filter(user=request.user).select_related('course')
         serializer = SubscriptionSerializer(subscriptions, many=True)
+        return Response(serializer.data)
+
+
+class CoursePaymentView(APIView):
+    """
+    Эндпоинт для оплаты курса через Stripe
+    POST /api/lms/courses/{id}/payment/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk=None):
+        course = get_object_or_404(Course, pk=pk)
+
+        # Проверяем цену курса
+        if course.price <= 0:
+            return Response(
+                {'error': 'У данного курса нет установленной цены'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Синхронизируем курс с Stripe
+        try:
+            course = sync_course_with_stripe(course)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Создаем сессию для оплаты
+        success_url = request.data.get(
+            'success_url',
+            'http://localhost:3000/success'
+        )
+        cancel_url = request.data.get(
+            'cancel_url',
+            'http://localhost:3000/cancel'
+        )
+
+        try:
+            checkout_session = create_checkout_session(
+                price_id=course.stripe_price_id,
+                course_name=course.name,
+                success_url=success_url,
+                cancel_url=cancel_url
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Создаем запись о платеже
+        payment = Payment.objects.create(
+            user=request.user,
+            course=course,
+            amount=course.price,
+            stripe_session_id=checkout_session.id,
+            stripe_payment_intent_id=checkout_session.payment_intent,
+            payment_url=checkout_session.url,
+            status='pending'
+        )
+
+        return Response({
+            'payment_id': payment.id,
+            'payment_url': checkout_session.url,
+            'session_id': checkout_session.id,
+        }, status=status.HTTP_201_CREATED)
+
+
+class PaymentStatusView(APIView):
+    """
+    Эндпоинт для проверки статуса платежа
+    GET /api/lms/payments/{id}/status/
+    POST /api/lms/payments/status/ - по session_id
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk=None):
+        """Получение статуса платежа по ID в БД"""
+        payment = get_object_or_404(Payment, pk=pk, user=request.user)
+
+        # Дополнительное задание: проверка статуса через Stripe
+        if payment.stripe_session_id:
+            try:
+                session = get_stripe_session_status(payment.stripe_session_id)
+
+                # Обновляем статус платежа
+                if session.payment_status == 'paid' and payment.status != 'paid':
+                    payment.status = 'paid'
+                    payment.paid_at = payment.paid_at or session.created
+                    payment.save()
+                elif session.payment_status == 'unpaid' and payment.status == 'pending':
+                    payment.status = 'pending'
+                    payment.save()
+                elif session.status == 'expired':
+                    payment.status = 'failed'
+                    payment.save()
+            except Exception:
+                pass
+
+        serializer = PaymentSerializer(payment)
+        return Response(serializer.data)
+
+    def post(self, request):
+        """Проверка статуса платежа по session_id из Stripe"""
+        serializer = PaymentStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        session_id = serializer.validated_data['session_id']
+
+        try:
+            payment = Payment.objects.get(stripe_session_id=session_id, user=request.user)
+        except Payment.DoesNotExist:
+            return Response(
+                {'error': 'Платеж не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Получаем статус из Stripe
+        try:
+            session = get_stripe_session_status(session_id)
+
+            # Обновляем статус платежа
+            if session.payment_status == 'paid':
+                payment.status = 'paid'
+                payment.paid_at = payment.paid_at or session.created
+                payment.save()
+            elif session.status == 'expired':
+                payment.status = 'failed'
+                payment.save()
+
+            return Response({
+                'payment_id': payment.id,
+                'status': payment.status,
+                'stripe_status': session.payment_status,
+                'session_status': session.status
+            })
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class PaymentListView(APIView):
+    """
+    Список платежей пользователя
+    GET /api/lms/payments/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        payments = Payment.objects.filter(user=request.user).select_related('course')
+        serializer = PaymentSerializer(payments, many=True)
         return Response(serializer.data)

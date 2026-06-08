@@ -2,7 +2,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from lms.views import (
     CourseViewSet, LessonListCreateView, LessonRetrieveUpdateDeleteView,
-    LessonsByCourseView, SubscriptionView
+    LessonsByCourseView, SubscriptionView, CoursePaymentView,
+    PaymentStatusView, PaymentListView
 )
 
 router = DefaultRouter()
@@ -20,4 +21,10 @@ urlpatterns = [
 
     # Подписка на курс
     path('subscribe/', SubscriptionView.as_view(), name='subscription'),
+
+    # Оплата курса
+    path('courses/<int:pk>/payment/', CoursePaymentView.as_view(), name='course-payment'),
+    path('payments/', PaymentListView.as_view(), name='payment-list'),
+    path('payments/<int:pk>/status/', PaymentStatusView.as_view(), name='payment-status'),
+    path('payments/status/', PaymentStatusView.as_view(), name='payment-status-by-session'),
 ]

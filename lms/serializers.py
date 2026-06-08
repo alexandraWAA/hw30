@@ -90,3 +90,43 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         model = Subscription
         fields = ['id', 'user', 'user_email', 'course', 'course_name', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для модели платежа
+    """
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    course_name = serializers.CharField(source='course.name', read_only=True)
+
+    class Meta:
+        model = Payment
+        fields = [
+            'id', 'user', 'user_email', 'course', 'course_name',
+            'amount', 'stripe_session_id', 'stripe_payment_intent_id',
+            'payment_url', 'status', 'created_at', 'paid_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'paid_at', 'stripe_session_id', 'payment_url']
+
+
+class PaymentCreateSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для создания платежа
+    """
+
+    class Meta:
+        model = Payment
+        fields = ['course', 'amount']
+
+    def validate_course(self, value):
+        """Проверка, что курс существует и имеет цену"""
+        if value.price <= 0:
+            raise serializers.ValidationError('У данного курса нет установленной цены')
+        return value
+
+
+class PaymentStatusSerializer(serializers.Serializer):
+    """
+    Сериализатор для проверки статуса платежа
+    """
+    session_id = serializers.CharField()
