@@ -1,30 +1,27 @@
+import string
+
 from rest_framework import viewsets, generics, permissions, status
-from lms.models import Course, Lesson, Subscription
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiExample, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
+
+from lms.models import Course, Lesson, Subscription, Payment
 from lms.serializers import (
     CourseSerializer, CourseCreateUpdateSerializer,
     LessonSerializer, LessonCreateUpdateSerializer,
-    SubscriptionSerializer
+    SubscriptionSerializer, PaymentSerializer
 )
 from lms.paginators import CoursePaginator, LessonPaginator
+from lms.services import sync_course_with_stripe, create_checkout_session, get_stripe_session_status
 from users.permissions import IsModerator, IsOwner
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status, serializers
-from django.shortcuts import get_object_or_404
-from django.conf import settings
-from lms.models import Course, Payment
-from lms.serializers import PaymentSerializer, PaymentCreateSerializer, PaymentStatusSerializer
-from lms.services import (
-    sync_course_with_stripe, create_checkout_session,
-    get_stripe_session_status
-)
+
 
 class CourseViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet для CRUD операций с курсами
-    """
+    """ViewSet для управления курсами"""
     queryset = Course.objects.all()
-    pagination_class = CoursePaginator  # Добавляем пагинацию
+    pagination_class = CoursePaginator
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -32,22 +29,17 @@ class CourseViewSet(viewsets.ModelViewSet):
         return CourseSerializer
 
     def get_serializer_context(self):
-        """Передаем request в сериализатор для определения подписки"""
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
 
     def get_queryset(self):
-        """Фильтрация списка курсов"""
         qs = super().get_queryset()
         user = self.request.user
-
         if not user.is_authenticated:
             return qs.none()
-
         if user.groups.filter(name='Модераторы').exists():
             return qs
-
         return qs.filter(owner=user)
 
     def get_permissions(self):
@@ -68,11 +60,9 @@ class CourseViewSet(viewsets.ModelViewSet):
 
 
 class LessonListCreateView(generics.ListCreateAPIView):
-    """
-    Generic класс для получения списка уроков и создания нового урока
-    """
+    """Список и создание уроков"""
     queryset = Lesson.objects.select_related('course', 'owner').all()
-    pagination_class = LessonPaginator  # Добавляем пагинацию
+    pagination_class = LessonPaginator
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -82,13 +72,10 @@ class LessonListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-
         if not user.is_authenticated:
             return qs.none()
-
         if user.groups.filter(name='Модераторы').exists():
             return qs
-
         return qs.filter(owner=user)
 
     def get_permissions(self):
@@ -101,9 +88,7 @@ class LessonListCreateView(generics.ListCreateAPIView):
 
 
 class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    Generic класс для получения, обновления и удаления одного урока
-    """
+    """Получение, обновление и удаление урока"""
     queryset = Lesson.objects.select_related('course', 'owner').all()
 
     def get_serializer_class(self):
@@ -122,30 +107,64 @@ class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class LessonsByCourseView(generics.ListAPIView):
-    """
-    Список уроков по конкретному курсу
-    """
+    """Список уроков по конкретному курсу"""
     serializer_class = LessonSerializer
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = LessonPaginator  # Добавляем пагинацию
+    pagination_class = LessonPaginator
 
     def get_queryset(self):
         course_id = self.kwargs.get('course_id')
         user = self.request.user
-
         qs = Lesson.objects.filter(course_id=course_id).select_related('course', 'owner')
-
         if user.groups.filter(name='Модераторы').exists():
             return qs
-
         return qs.filter(owner=user)
 
 
+# ============================================
+# APIView с полной документацией
+# ============================================
+
+@extend_schema_view(
+    post=extend_schema(
+        summary="Управление подпиской на курс",
+        description="Создает или удаляет подписку на курс. Если подписка существует - удаляет, если нет - создает.",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'course_id': {'type': 'integer', 'description': 'ID курса', 'example': 1}
+                },
+                'required': ['course_id']
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description='Успешный ответ',
+                response={
+                    'type': 'object',
+                    'properties': {
+                        'message': {'type': 'string', 'example': 'Подписка добавлена'},
+                        'is_subscribed': {'type': 'boolean', 'example': True},
+                        'course_id': {'type': 'integer', 'example': 1},
+                        'course_name': {'type': 'string', 'example': 'Python Course'}
+                    }
+                }
+            ),
+            400: OpenApiResponse(description='Не указан course_id'),
+            404: OpenApiResponse(description='Курс не найден'),
+        },
+        tags=['Подписки']
+    ),
+    get=extend_schema(
+        summary="Список подписок пользователя",
+        description="Возвращает список всех подписок текущего пользователя.",
+        responses={200: SubscriptionSerializer(many=True)},
+        tags=['Подписки']
+    )
+)
 class SubscriptionView(APIView):
-    """
-    Эндпоинт для управления подпиской на курс
-    POST /api/lms/subscribe/ - создать или удалить подписку
-    """
+    """Эндпоинт для управления подпиской на курс"""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -159,17 +178,13 @@ class SubscriptionView(APIView):
             )
 
         course = get_object_or_404(Course, pk=course_id)
-
-        # Проверяем, есть ли уже подписка
         subscription = Subscription.objects.filter(user=user, course=course)
 
         if subscription.exists():
-            # Если подписка есть - удаляем
             subscription.delete()
             message = 'Подписка удалена'
             subscribed = False
         else:
-            # Если подписки нет - создаем
             Subscription.objects.create(user=user, course=course)
             message = 'Подписка добавлена'
             subscribed = True
@@ -182,32 +197,61 @@ class SubscriptionView(APIView):
         }, status=status.HTTP_200_OK)
 
     def get(self, request, *args, **kwargs):
-        """
-        Получение списка подписок пользователя
-        """
         subscriptions = Subscription.objects.filter(user=request.user).select_related('course')
         serializer = SubscriptionSerializer(subscriptions, many=True)
         return Response(serializer.data)
 
 
+@extend_schema_view(
+    post=extend_schema(
+        summary="Создание платежа для курса",
+        description="Создает платеж в Stripe и возвращает ссылку на оплату. Для тестирования используйте тестовые карты Stripe.",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'success_url': {'type': 'string', 'description': 'URL для перенаправления после успешной оплаты',
+                                    'example': 'http://localhost:8000/api/docs/'},
+                    'cancel_url': {'type': string', 'description': 'URL для перенаправления при отмене оплаты', '
+                                   example': 'http: // localhost
+
+:8000 / api / docs / '}
+}
+}
+},
+responses = {
+    201: OpenApiResponse(
+        description='Платеж успешно создан',
+        response={
+            'type': 'object',
+            'properties': {
+                'payment_id': {'type': 'integer', 'example': 1},
+                'payment_url': {'type': 'string', 'example': 'https://checkout.stripe.com/...'},
+                'session_id': {'type': 'string', 'example': 'cs_test_...'}
+            }
+        }
+    ),
+    400: OpenApiResponse(description='У курса нет цены'),
+    404: OpenApiResponse(description='Курс не найден'),
+    500: OpenApiResponse(description='Ошибка Stripe'),
+},
+tags = ['Платежи']
+)
+)
+
 class CoursePaymentView(APIView):
-    """
-    Эндпоинт для оплаты курса через Stripe
-    POST /api/lms/courses/{id}/payment/
-    """
+    """Эндпоинт для оплаты курса через Stripe"""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk=None):
         course = get_object_or_404(Course, pk=pk)
 
-        # Проверяем цену курса
         if course.price <= 0:
             return Response(
                 {'error': 'У данного курса нет установленной цены'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Синхронизируем курс с Stripe
         try:
             course = sync_course_with_stripe(course)
         except Exception as e:
@@ -216,14 +260,13 @@ class CoursePaymentView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Создаем сессию для оплаты
         success_url = request.data.get(
             'success_url',
-            'http://localhost:3000/success'
+            'http://localhost:8000/api/docs/'
         )
         cancel_url = request.data.get(
             'cancel_url',
-            'http://localhost:3000/cancel'
+            'http://localhost:8000/api/docs/'
         )
 
         try:
@@ -239,7 +282,6 @@ class CoursePaymentView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Создаем запись о платеже
         payment = Payment.objects.create(
             user=request.user,
             course=course,
@@ -257,24 +299,57 @@ class CoursePaymentView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Получение статуса платежа по ID",
+        description="Возвращает статус платежа по ID платежа в базе данных. При необходимости обновляет статус через Stripe.",
+        responses={
+            200: PaymentSerializer,
+            404: OpenApiResponse(description='Платеж не найден'),
+        },
+        tags=['Платежи']
+    ),
+    post=extend_schema(
+        summary="Проверка статуса платежа по session_id Stripe",
+        description="Проверяет статус платежа в Stripe по session_id и обновляет статус в базе данных.",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'session_id': {'type': 'string', 'description': 'ID сессии Stripe', 'example': 'cs_test_...'}
+                },
+                'required': ['session_id']
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description='Статус платежа',
+                response={
+                    'type': 'object',
+                    'properties': {
+                        'payment_id': {'type': 'integer', 'example': 1},
+                        'status': {'type': 'string', 'enum': ['pending', 'paid', 'failed', 'refunded']},
+                        'stripe_status': {'type': 'string', 'example': 'paid'},
+                        'session_status': {'type': 'string', 'example': 'complete'}
+                    }
+                }
+            ),
+            404: OpenApiResponse(description='Платеж не найден'),
+            500: OpenApiResponse(description='Ошибка Stripe'),
+        },
+        tags=['Платежи']
+    )
+)
 class PaymentStatusView(APIView):
-    """
-    Эндпоинт для проверки статуса платежа
-    GET /api/lms/payments/{id}/status/
-    POST /api/lms/payments/status/ - по session_id
-    """
+    """Эндпоинт для проверки статуса платежа"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk=None):
-        """Получение статуса платежа по ID в БД"""
         payment = get_object_or_404(Payment, pk=pk, user=request.user)
 
-        # Дополнительное задание: проверка статуса через Stripe
         if payment.stripe_session_id:
             try:
                 session = get_stripe_session_status(payment.stripe_session_id)
-
-                # Обновляем статус платежа
                 if session.payment_status == 'paid' and payment.status != 'paid':
                     payment.status = 'paid'
                     payment.paid_at = payment.paid_at or session.created
@@ -292,11 +367,13 @@ class PaymentStatusView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        """Проверка статуса платежа по session_id из Stripe"""
-        serializer = PaymentStatusSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        session_id = request.data.get('session_id')
 
-        session_id = serializer.validated_data['session_id']
+        if not session_id:
+            return Response(
+                {'error': 'Необходимо указать session_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             payment = Payment.objects.get(stripe_session_id=session_id, user=request.user)
@@ -306,11 +383,9 @@ class PaymentStatusView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Получаем статус из Stripe
         try:
             session = get_stripe_session_status(session_id)
 
-            # Обновляем статус платежа
             if session.payment_status == 'paid':
                 payment.status = 'paid'
                 payment.paid_at = payment.paid_at or session.created
@@ -332,11 +407,16 @@ class PaymentStatusView(APIView):
             )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Список платежей пользователя",
+        description="Возвращает список всех платежей текущего пользователя.",
+        responses={200: PaymentSerializer(many=True)},
+        tags=['Платежи']
+    )
+)
 class PaymentListView(APIView):
-    """
-    Список платежей пользователя
-    GET /api/lms/payments/
-    """
+    """Список платежей пользователя"""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):

@@ -1,7 +1,7 @@
-from rest_framework import serializers
-from lms.models import Course, Lesson, Subscription
-from lms.validators import validate_youtube_url
 
+from rest_framework import serializers
+from lms.models import Course, Lesson, Subscription, Payment
+from lms.validators import validate_youtube_url
 
 class LessonSerializer(serializers.ModelSerializer):
     """
@@ -91,11 +91,15 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'user_email', 'course', 'course_name', 'created_at']
         read_only_fields = ['id', 'created_at']
 
+class PaymentStatusSerializer(serializers.Serializer):
+    """
+    Сериализатор для проверки статуса платежа
+    """
+    session_id = serializers.CharField()
+
 
 class PaymentSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для модели платежа
-    """
+    """Сериализатор для модели платежа"""
     user_email = serializers.CharField(source='user.email', read_only=True)
     course_name = serializers.CharField(source='course.name', read_only=True)
 
@@ -110,23 +114,13 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class PaymentCreateSerializer(serializers.ModelSerializer):
-    """
-    Сериализатор для создания платежа
-    """
+    """Сериализатор для создания платежа"""
 
     class Meta:
         model = Payment
         fields = ['course', 'amount']
 
     def validate_course(self, value):
-        """Проверка, что курс существует и имеет цену"""
         if value.price <= 0:
             raise serializers.ValidationError('У данного курса нет установленной цены')
         return value
-
-
-class PaymentStatusSerializer(serializers.Serializer):
-    """
-    Сериализатор для проверки статуса платежа
-    """
-    session_id = serializers.CharField()
