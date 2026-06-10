@@ -16,12 +16,38 @@ from lms.serializers import (
 from lms.paginators import CoursePaginator, LessonPaginator
 from lms.services import sync_course_with_stripe, create_checkout_session, get_stripe_session_status
 from users.permissions import IsModerator, IsOwner
+from lms.tasks import send_course_update_notification, send_lesson_update_notification
 
 
 class CourseViewSet(viewsets.ModelViewSet):
     """ViewSet для управления курсами"""
     queryset = Course.objects.all()
     pagination_class = CoursePaginator
+
+    def perform_update(self, serializer):
+        """
+        При обновлении курса запускаем задачу на уведомление подписчиков
+        """
+        # Сохраняем старые значения для сравнения
+        instance = self.get_object()
+        old_data = {
+            'name': instance.name,
+            'description': instance.description,
+            'price': instance.price,
+        }
+
+        # Сохраняем обновление
+        serializer.save()
+
+        # Определяем, какие поля были обновлены
+        updated_fields = []
+        for field in ['name', 'description', 'price']:
+            if getattr(instance, field) != old_data.get(field):
+                updated_fields.append(field)
+
+        # Если есть изменения, отправляем уведомление подписчикам
+        if updated_fields:
+            send_course_update_notification.delay(instance.id, updated_fields)
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -91,6 +117,32 @@ class LessonRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     """Получение, обновление и удаление урока"""
     queryset = Lesson.objects.select_related('course', 'owner').all()
 
+    def perform_update(self, serializer):
+        """
+        * Дополнительное задание: при обновлении урока запускаем задачу
+        с проверкой на 4 часа
+        """
+        instance = self.get_object()
+        old_data = {
+            'name': instance.name,
+            'description': instance.description,
+            'video_url': instance.video_url,
+        }
+
+        serializer.save()
+
+        # Определяем, какие поля были обновлены
+        updated_fields = []
+        for field in ['name', 'description', 'video_url']:
+            if getattr(instance, field) != old_data.get(field):
+                updated_fields.append(field)
+
+        if updated_fields:
+            send_lesson_update_notification.delay(
+                instance.id,
+                instance.course.id,
+                updated_fields
+            )
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
             return LessonCreateUpdateSerializer

@@ -22,6 +22,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_spectacular',
+    # Celery
+    'django_celery_beat',
     # Local apps
     'users',
     'lms',
@@ -57,9 +59,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# ============================================
-# POSTGRESQL (возвращен)
-# ============================================
+# PostgreSQL
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -126,5 +126,21 @@ SPECTACULAR_SETTINGS = {
 # Stripe Settings
 STRIPE_API_KEY = os.getenv('STRIPE_API_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+
+# ============================================
+# CELERY НАСТРОЙКИ
+# ============================================
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Celery Beat (периодические задачи)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
