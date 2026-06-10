@@ -34,6 +34,26 @@ class Course(models.Model):
         null=True,
         blank=True
     )
+    # Stripe поля
+    stripe_product_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='ID продукта в Stripe'
+    )
+    stripe_price_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='ID цены в Stripe'
+    )
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='Цена',
+        default=0,
+        validators=[MinValueValidator(0)]
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
 
@@ -73,7 +93,7 @@ class Lesson(models.Model):
         help_text='Введите ссылку на видео (только YouTube)',
         blank=True,
         null=True,
-        validators=[validate_youtube_url]  # Добавляем валидатор
+        validators=[validate_youtube_url]
     )
     course = models.ForeignKey(
         Course,
@@ -123,8 +143,70 @@ class Subscription(models.Model):
     class Meta:
         verbose_name = 'Подписка'
         verbose_name_plural = 'Подписки'
-        unique_together = ['user', 'course']  # Гарантируем уникальность пары
+        unique_together = ['user', 'course']
         ordering = ['-created_at']
 
     def __str__(self):
         return f"{self.user.email} -> {self.course.name}"
+
+
+class Payment(models.Model):
+    """
+    Модель платежа
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name='Пользователь'
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name='Курс'
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='Сумма оплаты'
+    )
+    stripe_session_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='ID сессии в Stripe'
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='ID платежа в Stripe'
+    )
+    payment_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        verbose_name='Ссылка на оплату'
+    )
+    status = models.CharField(
+        max_length=50,
+        default='pending',
+        verbose_name='Статус платежа',
+        choices=[
+            ('pending', 'Ожидает оплаты'),
+            ('paid', 'Оплачен'),
+            ('failed', 'Ошибка'),
+            ('refunded', 'Возврат'),
+        ]
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
+    paid_at = models.DateTimeField(blank=True, null=True, verbose_name='Дата оплаты')
+
+    class Meta:
+        verbose_name = 'Платеж'
+        verbose_name_plural = 'Платежи'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Платеж {self.user.email} - {self.course.name} - {self.amount} руб."
